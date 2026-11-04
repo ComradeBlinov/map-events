@@ -25,34 +25,30 @@
   <label>за последние:
     <select id="hours">
       <option value="1">1 час</option>
-      <option value="6" selected>6 часов</option>
+      <option value="6">6 часов</option>
       <option value="24">24 часа</option>
-      <option value="168">7 дней</option>
+      <option value="168" selected>7 дней</option>
     </select>
   </label>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
-const SUPABASE_URL = "https://apjtpzzajpywldvmvggn.supabase.co";
-const SUPABASE_ANON = "sb_publishable_gxqrd9Rq1UPFdxHJWtr_aA_faZ7CRcM";
-
 const map = L.map('map').setView([49.5, 34], 6);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap'
 }).addTo(map);
+
 const cluster = L.markerClusterGroup();
 map.addLayer(cluster);
 
 const COLORS = { "дрон": "#e74c3c", "ракета": "#8e44ad", "событие": "#f39c12" };
 let allEvents = [];
 let activeKinds = new Set(["дрон","ракета","событие"]);
-let hours = 6;
+let hours = 168; // По умолчанию 7 дней
 
 function fetchData() {
-  const since = new Date(Date.now() - hours*3600*1000).toISOString();
-  const url = `${SUPABASE_URL}/rest/v1/events?select=*&ts=gte.${since}&lat=not.is.null&order=ts.desc&limit=1000`;
-  fetch(url, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } })
+  fetch('./data.json')
     .then(r => r.json())
     .then(d => { allEvents = d; render(); })
     .catch(e => console.error(e));
@@ -65,17 +61,24 @@ function esc(s) {
 function render() {
   cluster.clearLayers();
   for (const ev of allEvents) {
+    if (!ev.lat || !ev.lon) continue;
     if (!activeKinds.has(ev.kind)) continue;
+    
+    // Фильтр по времени
+    const evTime = new Date(ev.ts).getTime();
+    const now = new Date().getTime();
+    if (now - evTime > hours * 3600 * 1000) continue;
+
     const color = COLORS[ev.kind] || "#666";
     const m = L.circleMarker([ev.lat, ev.lon], {
-      radius: 6 + ev.confidence*4, color,
+      radius: 6 + (ev.confidence || 0.5)*4, color,
       fillColor: color, fillOpacity: 0.65, weight: 1
     });
     const time = new Date(ev.ts).toLocaleString('ru-RU');
     m.bindPopup(
       `<b>${ev.kind}</b> · ${ev.place || "?"}<br>${time}<br><br>` +
       `${esc(ev.text).slice(0,400)}<br><br>` +
-      `<i>канал: ${ev.channel} · точность: ${ev.confidence}</i>`
+      `<i>канал: ${ev.channel}</i>`
     );
     cluster.addLayer(m);
   }
@@ -89,14 +92,11 @@ document.querySelectorAll('#filters input[type=checkbox]').forEach(cb => {
   });
 });
 document.getElementById('hours').addEventListener('change', e => {
-  hours = +e.target.value; fetchData();
+  hours = +e.target.value; render();
 });
 
-function fetchData() {
-  const since = new Date(Date.now() - hours*3600*1000).toISOString();
-  const url = `${SUPABASE_URL}/rest/v1/events?select=*&ts=gte.${since}&lat=not.is.null&order=ts.desc&limit=1000`;
-  fetch(url, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } })
-    .then(r => r.json())
-    .then(d => { allEvents = d; render(); })
-    .catch(e => console.error(e));
-}
+fetchData();
+setInterval(fetchData, 300000); // Обновляем данные каждые 5 минут
+</script>
+</body>
+</html>
