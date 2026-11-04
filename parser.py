@@ -1,10 +1,10 @@
-import os, re, sys
+import os, re, sys, json
 import requests
 from bs4 import BeautifulSoup
 from cities import CITIES
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 CHANNELS = ["lpr1_treugolnik", "kupolrussia", "den_v_kadre"]
 
@@ -13,6 +13,21 @@ SB_HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
 }
+
+# Список областей для поиска
+REGIONS = [
+    "Белгородская", "Брянская", "Воронежская", "Курская", "Липецкая", 
+    "Орловская", "Тамбовская", "Тульская", "Рязанская", "Калужская",
+    "Смоленская", "Тверская", "Московская", "Ленинградская", "Псковская",
+    "Новгородская", "Вологодская", "Мурманская", "Архангельская",
+    "Ростовская", "Волгоградская", "Астраханская", "Краснодарский", 
+    "Ставропольский", "Республика Крым", "Саратовская", "Пензенская",
+    "Самарская", "Ульяновская", "Оренбургская", "Челябинская",
+    "Свердловская", "Тюменская", "Омская", "Новосибирская", "Кемеровская",
+    "Иркутская", "Запорожская", "Херсонская", "Донецкая", "Луганская",
+    "Харьковская", "Сумская", "Черниговская", "Полтавская", "Днепропетровская",
+    "Одесская", "Николаевская", "Киевская", "Винницкая", "Житомирская"
+]
 
 COORD_RE = re.compile(r'(\d{1,2}[.,]\d{3,8})[\s,;]+([1-3]\d[.,]\d{3,8})')
 
@@ -44,26 +59,44 @@ def extract_coords(text):
 
 def extract_place(text):
     low = text.lower()
-    best = None
+    # Ищем город
+    best_city = None
     for name, (lat, lon) in CITIES.items():
         if name.lower() in low:
-            if best is None or len(name) > len(best[0]):
-                best = (name, lat, lon)
-    return best
+            if best_city is None or len(name) > len(best_city[0]):
+                best_city = (name, lat, lon)
+    
+    # Ищем область
+    best_region = None
+    for reg in REGIONS:
+        if reg.lower() in low:
+            best_region = reg
+            
+    if best_city:
+        return best_city[0], best_city[1], best_city[2], best_region
+    if best_region:
+        return None, None, None, best_region
+        
+    return None, None, None, None
 
 def parse_post(text):
     kind = classify(text)
     lat, lon = extract_coords(text)
     place = None
+    region = None
     conf = 0.3
+    
     if lat is not None:
         conf = 0.9
     else:
-        p = extract_place(text)
-        if p:
-            place, lat, lon = p
+        place, plat, plon, region = extract_place(text)
+        if place:
+            lat, lon = plat, plon
             conf = 0.5
-    return {"kind": kind, "lat": lat, "lon": lon, "place": place, "confidence": conf}
+        elif region:
+            conf = 0.4 # Точка не ставится, но область красится
+
+    return {"kind": kind, "lat": lat, "lon": lon, "place": place, "region": region, "confidence": conf}
 
 def fetch_channel(channel):
     try:
@@ -104,40 +137,12 @@ def main():
                 "text": p["text"][:2000],
                 **parsed,
             })
-    if not rows:
-        return
-    r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/events",
-        headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=minimal"},
-        json=rows,
-    )
-    print("insert:", r.status_code)
-    if r.status_code not in (200, 201, 204):
-        print(r.text, file=sys.stderr)
-
-if __name__ == "__main__":
-    import json
-    rows = []
-    for ch in CHANNELS:
-        posts = fetch_channel(ch)
-        print(f"{ch}: {len(posts)} posts")
-        for p in posts:
-            parsed = parse_post(p["text"])
-            rows.append({
-                "channel": p["channel"],
-                "post_id": p["post_id"],
-                "ts": p["ts"],
-                "text": p["text"][:2000],
-                **parsed,
-            })
     
-    # Сохраняем в файл data.json
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
     print("data.json saved")
 
-    # В Supabase тоже попробуем отправить, но если упадет - не страшно
-    if rows:
+    if rows and SUPABASE_URL:
         try:
             r = requests.post(
                 f"{SUPABASE_URL}/rest/v1/events",
@@ -147,3 +152,6 @@ if __name__ == "__main__":
             print("insert:", r.status_code)
         except Exception as e:
             print("Supabase error:", e)
+
+if __name__ == "__main__":
+    main()
