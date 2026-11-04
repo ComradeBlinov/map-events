@@ -13,7 +13,9 @@
              padding:10px 14px;border-radius:8px;box-shadow:0 1px 8px rgba(0,0,0,.3);
              font-family:system-ui,sans-serif;font-size:14px}
     #filters label{display:block;cursor:pointer;margin:2px 0}
-    #filters select{margin-top:6px}
+    .region-popup { font-family: system-ui, sans-serif; font-size: 14px;}
+    .region-popup h3 { margin: 0 0 5px 0; }
+    .region-popup ul { margin: 0; padding-left: 20px; }
   </style>
 </head>
 <body>
@@ -45,17 +47,79 @@ map.addLayer(cluster);
 const COLORS = { "дрон": "#e74c3c", "ракета": "#8e44ad", "событие": "#f39c12" };
 let allEvents = [];
 let activeKinds = new Set(["дрон","ракета","событие"]);
-let hours = 168; // По умолчанию 7 дней
+let hours = 168;
+
+// Слой для областей
+let regionLayer = L.geoJSON(null, {
+  style: function(feature) {
+    return { color: "#888", weight: 1, fillOpacity: 0.1, fillColor: "#3388ff" };
+  },
+  onEachFeature: function(feature, layer) {
+    layer.on('click', function() {
+      const regionName = feature.properties.name;
+      const evs = allEvents.filter(e => e.region && e.region.includes(regionName) || (e.region && regionName.includes(e.region)));
+      
+      const activeEvs = evs.filter(e => {
+        const evTime = new Date(e.ts).getTime();
+        return (new Date().getTime() - evTime <= hours * 3600 * 1000) && activeKinds.has(e.kind);
+      });
+
+      if (activeEvs.length === 0) {
+        layer.bindPopup(`<div class="region-popup"><h3>${regionName}</h3><p>Нет активных событий</p></div>`).openPopup();
+        return;
+      }
+
+      let listHtml = "<ul>";
+      activeEvs.forEach(e => {
+        const dt = new Date(e.ts).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'});
+        listHtml += `<li><b>${e.kind.toUpperCase()}</b> (${dt}): ${e.text.slice(0, 50)}...</li>`;
+      });
+      listHtml += "</ul>";
+      
+      layer.bindPopup(`<div class="region-popup"><h3>${regionName}</h3>${listHtml}</div>`).openPopup();
+    });
+  }
+}).addTo(map);
+
+// Загружаем границы областей России с открытого источника
+fetch('https://raw.githubusercontent.com/BorisBail/Geodata/master/russia.geojson')
+  .then(r => r.json())
+  .then(data => {
+    regionLayer.addData(data);
+  }).catch(e => console.log("Не загрузились регионы:", e));
 
 function fetchData() {
   fetch('./data.json')
     .then(r => r.json())
-    .then(d => { allEvents = d; render(); })
+    .then(d => { allEvents = d; render(); updateRegions(); })
     .catch(e => console.error(e));
 }
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
+}
+
+function updateRegions() {
+  regionLayer.eachLayer(layer => {
+    const regionName = layer.feature.properties.name;
+    const activeEvs = allEvents.filter(e => {
+      const matchRegion = e.region && (e.region.includes(regionName) || regionName.includes(e.region));
+      const evTime = new Date(e.ts).getTime();
+      return matchRegion && (new Date().getTime() - evTime <= hours * 3600 * 1000) && activeKinds.has(e.kind);
+    });
+
+    let fillColor = "#3388ff";
+    let fillOpacity = 0.05;
+    
+    if (activeEvs.length > 0) {
+      if (activeEvs.some(e => e.kind === "ракета")) fillColor = "#8e44ad";
+      else if (activeEvs.some(e => e.kind === "дрон")) fillColor = "#e74c3c";
+      else fillColor = "#f39c12";
+      fillOpacity = 0.3;
+    }
+    
+    layer.setStyle({ fillColor, fillOpacity });
+  });
 }
 
 function render() {
@@ -64,7 +128,6 @@ function render() {
     if (!ev.lat || !ev.lon) continue;
     if (!activeKinds.has(ev.kind)) continue;
     
-    // Фильтр по времени
     const evTime = new Date(ev.ts).getTime();
     const now = new Date().getTime();
     if (now - evTime > hours * 3600 * 1000) continue;
@@ -76,7 +139,7 @@ function render() {
     });
     const time = new Date(ev.ts).toLocaleString('ru-RU');
     m.bindPopup(
-      `<b>${ev.kind}</b> · ${ev.place || "?"}<br>${time}<br><br>` +
+      `<b>${ev.kind}</b> · ${ev.place || ev.region || "?"}<br>${time}<br><br>` +
       `${esc(ev.text).slice(0,400)}<br><br>` +
       `<i>канал: ${ev.channel}</i>`
     );
@@ -89,14 +152,15 @@ document.querySelectorAll('#filters input[type=checkbox]').forEach(cb => {
     activeKinds = new Set([...document.querySelectorAll('#filters input:checked')]
       .map(x => x.dataset.kind));
     render();
+    updateRegions();
   });
 });
 document.getElementById('hours').addEventListener('change', e => {
-  hours = +e.target.value; render();
+  hours = +e.target.value; render(); updateRegions();
 });
 
 fetchData();
-setInterval(fetchData, 300000); // Обновляем данные каждые 5 минут
+setInterval(fetchData, 300000);
 </script>
 </body>
 </html>
