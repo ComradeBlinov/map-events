@@ -92,8 +92,11 @@ document.getElementById('hours').addEventListener('change', e => {
   hours = +e.target.value; fetchData();
 });
 
-fetchData();
-setInterval(fetchData, 30000);
-</script>
-</body>
-</html>
+function fetchData() {
+  const since = new Date(Date.now() - hours*3600*1000).toISOString();
+  const url = `${SUPABASE_URL}/rest/v1/events?select=*&ts=gte.${since}&lat=not.is.null&order=ts.desc&limit=1000`;
+  fetch(url, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } })
+    .then(r => r.json())
+    .then(d => { allEvents = d; render(); })
+    .catch(e => console.error(e));
+}
