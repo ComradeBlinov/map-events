@@ -3,6 +3,8 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
+permissions:
+  contents: write
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -16,3 +18,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - name: Commit data.json
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data.json
+          git commit -m "Update data.json" || echo "No changes"
+          git push
