@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Карта событий</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+  <style>
+    html,body,#map{height:100%;margin:0}
+    #filters{position:absolute;top:10px;right:10px;z-index:1000;background:#fff;
+             padding:10px 14px;border-radius:8px;box-shadow:0 1px 8px rgba(0,0,0,.3);
+             font-family:system-ui,sans-serif;font-size:14px}
+    #filters label{display:block;cursor:pointer;margin:2px 0}
+    #filters select{margin-top:6px}
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="filters">
+  <label><input type="checkbox" data-kind="дрон" checked> БПЛА</label>
+  <label><input type="checkbox" data-kind="ракета" checked> Ракеты</label>
+  <label><input type="checkbox" data-kind="событие" checked> События</label>
+  <label>за последние:
+    <select id="hours">
+      <option value="1">1 час</option>
+      <option value="6" selected>6 часов</option>
+      <option value="24">24 часа</option>
+      <option value="168">7 дней</option>
+    </select>
+  </label>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const SUPABASE_URL = "ВСТАВЬ_СЮДА_URL";
+const SUPABASE_ANON = "ВСТАВЬ_СЮДА_ANON_KEY";
+
+const map = L.map('map').setView([49.5, 34], 6);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap, &copy; CARTO'
+}).addTo(map);
+const cluster = L.markerClusterGroup();
+map.addLayer(cluster);
+
+const COLORS = { "дрон": "#e74c3c", "ракета": "#8e44ad", "событие": "#f39c12" };
+let allEvents = [];
+let activeKinds = new Set(["дрон","ракета","событие"]);
+let hours = 6;
+
+function fetchData() {
+  const since = new Date(Date.now() - hours*3600*1000).toISOString();
+  const url = `${SUPABASE_URL}/rest/v1/events?select=*&ts=gte.${since}&lat=not.is.null&order=ts.desc&limit=1000`;
+  fetch(url, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } })
+    .then(r => r.json())
+    .then(d => { allEvents = d; render(); })
+    .catch(e => console.error(e));
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
+}
+
+function render() {
+  cluster.clearLayers();
+  for (const ev of allEvents) {
+    if (!activeKinds.has(ev.kind)) continue;
+    const color = COLORS[ev.kind] || "#666";
+    const m = L.circleMarker([ev.lat, ev.lon], {
+      radius: 6 + ev.confidence*4, color,
+      fillColor: color, fillOpacity: 0.65, weight: 1
+    });
+    const time = new Date(ev.ts).toLocaleString('ru-RU');
+    m.bindPopup(
+      `<b>${ev.kind}</b> · ${ev.place || "?"}<br>${time}<br><br>` +
+      `${esc(ev.text).slice(0,400)}<br><br>` +
+      `<i>канал: ${ev.channel} · точность: ${ev.confidence}</i>`
+    );
+    cluster.addLayer(m);
+  }
+}
+
+document.querySelectorAll('#filters input[type=checkbox]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    activeKinds = new Set([...document.querySelectorAll('#filters input:checked')]
+      .map(x => x.dataset.kind));
+    render();
+  });
+});
+document.getElementById('hours').addEventListener('change', e => {
+  hours = +e.target.value; fetchData();
+});
+
+fetchData();
+setInterval(fetchData, 30000);
+</script>
+</body>
+</html>
