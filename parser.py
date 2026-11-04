@@ -116,4 +116,34 @@ def main():
         print(r.text, file=sys.stderr)
 
 if __name__ == "__main__":
-    main()
+    import json
+    rows = []
+    for ch in CHANNELS:
+        posts = fetch_channel(ch)
+        print(f"{ch}: {len(posts)} posts")
+        for p in posts:
+            parsed = parse_post(p["text"])
+            rows.append({
+                "channel": p["channel"],
+                "post_id": p["post_id"],
+                "ts": p["ts"],
+                "text": p["text"][:2000],
+                **parsed,
+            })
+    
+    # Сохраняем в файл data.json
+    with open("data.json", "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+    print("data.json saved")
+
+    # В Supabase тоже попробуем отправить, но если упадет - не страшно
+    if rows:
+        try:
+            r = requests.post(
+                f"{SUPABASE_URL}/rest/v1/events",
+                headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+                json=rows,
+            )
+            print("insert:", r.status_code)
+        except Exception as e:
+            print("Supabase error:", e)
