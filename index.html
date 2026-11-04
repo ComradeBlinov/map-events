@@ -38,8 +38,8 @@ const SUPABASE_URL = "ВСТАВЬ_СЮДА_URL";
 const SUPABASE_ANON = "ВСТАВЬ_СЮДА_ANON_KEY";
 
 const map = L.map('map').setView([49.5, 34], 6);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap, &copy; CARTO'
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap'
 }).addTo(map);
 const cluster = L.markerClusterGroup();
 map.addLayer(cluster);
